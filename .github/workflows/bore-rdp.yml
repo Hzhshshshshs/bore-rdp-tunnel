@@ -1,4 +1,4 @@
-name: "⚡ RDP Connect with Bore Tunnel"
+name: "⚡ RDP Connect with Bore Tunnel + Il2CppDumper"
 
 on:
   workflow_dispatch:
@@ -28,6 +28,92 @@ jobs:
           Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
           Write-Host "✅ Bore downloaded and extracted to $extractPath"
           Get-ChildItem $extractPath -Recurse
+
+      - name: "🔧 Install Il2CppDumper and Dependencies"
+        shell: pwsh
+        run: |
+          Write-Host "📥 Installing Il2CppDumper v6.7.46..."
+
+          # Create Il2CppDumper directory on Desktop for easy access via RDP
+          $il2cppDir = "$env:USERPROFILE\Desktop\Il2CppDumper"
+          New-Item -ItemType Directory -Path $il2cppDir -Force | Out-Null
+
+          # Download Il2CppDumper (self-contained Windows build - no .NET required)
+          $il2cppUrl = "https://github.com/Perfare/Il2CppDumper/releases/download/v6.7.46/Il2CppDumper-win-v6.7.46.zip"
+          $il2cppZip = "$env:TEMP\Il2CppDumper-win.zip"
+          Write-Host "📥 Downloading Il2CppDumper (self-contained Windows build)..."
+          Invoke-WebRequest -Uri $il2cppUrl -OutFile $il2cppZip -UseBasicParsing
+          Expand-Archive -Path $il2cppZip -DestinationPath $il2cppDir -Force
+          Write-Host "✅ Il2CppDumper extracted to $il2cppDir"
+          Get-ChildItem $il2cppDir -Recurse
+
+          # Also download the .NET 7 portable version as backup
+          $il2cppNet7Dir = "$env:USERPROFILE\Desktop\Il2CppDumper-net7"
+          New-Item -ItemType Directory -Path $il2cppNet7Dir -Force | Out-Null
+          $il2cppNet7Url = "https://github.com/Perfare/Il2CppDumper/releases/download/v6.7.46/Il2CppDumper-net7-win-v6.7.46.zip"
+          $il2cppNet7Zip = "$env:TEMP\Il2CppDumper-net7-win.zip"
+          Write-Host "📥 Downloading Il2CppDumper .NET 7 build..."
+          Invoke-WebRequest -Uri $il2cppNet7Url -OutFile $il2cppNet7Zip -UseBasicParsing
+          Expand-Archive -Path $il2cppNet7Zip -DestinationPath $il2cppNet7Dir -Force
+          Write-Host "✅ Il2CppDumper .NET 7 build extracted to $il2cppNet7Dir"
+
+          # Install .NET 6 and .NET 7 runtimes for maximum compatibility
+          Write-Host "📥 Installing .NET runtimes..."
+          
+          # Install .NET 6 Runtime
+          $dotnet6Url = "https://dot.net/v1/dotnet-install.ps1"
+          $installScript = "$env:TEMP\dotnet-install.ps1"
+          Invoke-WebRequest -Uri $dotnet6Url -OutFile $installScript -UseBasicParsing
+          & $installScript -Channel 6.0 -Runtime dotnet
+          Write-Host "✅ .NET 6 Runtime installed"
+
+          # Install .NET 7 Runtime
+          & $installScript -Channel 7.0 -Runtime dotnet
+          Write-Host "✅ .NET 7 Runtime installed"
+
+          # Install .NET 8 Runtime (latest)
+          & $installScript -Channel 8.0 -Runtime dotnet
+          Write-Host "✅ .NET 8 Runtime installed"
+
+          # Install Visual C++ Redistributable (required dependency)
+          Write-Host "📥 Installing Visual C++ Redistributable..."
+          $vcRedistUrl = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+          $vcRedistPath = "$env:TEMP\vc_redist.x64.exe"
+          Invoke-WebRequest -Uri $vcRedistUrl -OutFile $vcRedistPath -UseBasicParsing
+          Start-Process -FilePath $vcRedistPath -ArgumentList "/install", "/quiet", "/norestart" -Wait
+          Write-Host "✅ Visual C++ Redistributable installed"
+
+          # Create a helper batch file on Desktop for easy usage
+          $helperContent = @"
+          @echo off
+          echo ============================================
+          echo   Il2CppDumper v6.7.46 - Quick Launch
+          echo ============================================
+          echo.
+          echo Usage: Drag and drop your il2cpp binary (GameAssembly.dll / libil2cpp.so)
+          echo        and global-metadata.dat onto Il2CppDumper.exe
+          echo.
+          echo Or run from command line:
+          echo   Il2CppDumper.exe [il2cpp binary] [global-metadata.dat]
+          echo.
+          echo Files are located at:
+          echo   %USERPROFILE%\Desktop\Il2CppDumper\
+          echo   %USERPROFILE%\Desktop\Il2CppDumper-net7\
+          echo.
+          echo ============================================
+          pause
+          "@
+          Set-Content -Path "$env:USERPROFILE\Desktop\README-Il2CppDumper.bat" -Value $helperContent
+          Write-Host "✅ Helper script created on Desktop"
+
+          # Verify installation
+          Write-Host ""
+          Write-Host "============================================"
+          Write-Host "✅ Il2CppDumper INSTALLATION COMPLETE"
+          Write-Host "============================================"
+          Write-Host "Location 1 (Self-contained): $il2cppDir"
+          Write-Host "Location 2 (.NET 7 build):   $il2cppNet7Dir"
+          Write-Host "============================================"
 
       - name: "🌐 Start Bore Tunnel and Keep Alive"
         shell: pwsh
@@ -62,6 +148,10 @@ jobs:
               Write-Host "Username: runneradmin"
               Write-Host "Password: P@ssw0rd123!"
               Write-Host "============================================"
+              Write-Host ""
+              Write-Host "📦 Il2CppDumper is ready on the Desktop!"
+              Write-Host "   - Self-contained build: Desktop\Il2CppDumper\"
+              Write-Host "   - .NET 7 build: Desktop\Il2CppDumper-net7\"
               Write-Host ""
               Write-Host "Open your RDP client and connect to bore.pub:$port"
           } else {
