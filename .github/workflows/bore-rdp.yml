@@ -1,0 +1,91 @@
+name: "⚡ RDP Connect with Bore Tunnel"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  rdp-connect:
+    runs-on: windows-latest
+    steps:
+      - name: "🚀 Enable RDP and Set Password"
+        shell: pwsh
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          $password = "P@ssw0rd123!"
+          $user = "runneradmin"
+          net user $user $password
+          Write-Host "✅ RDP Enabled. User: $user"
+
+      - name: "📥 Download Bore Tunnel"
+        shell: pwsh
+        run: |
+          $url = "https://github.com/ekzhang/bore/releases/download/v0.6.0/bore-v0.6.0-x86_64-pc-windows-msvc.zip"
+          $zipPath = "$env:TEMP\bore.zip"
+          $extractPath = "$env:TEMP\bore"
+          Write-Host "📥 Downloading Bore..."
+          Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing
+          Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+          Write-Host "✅ Bore downloaded and extracted to $extractPath"
+          Get-ChildItem $extractPath -Recurse
+
+      - name: "🌐 Start Bore Tunnel and Keep Alive"
+        shell: pwsh
+        run: |
+          $borePath = Get-ChildItem "$env:TEMP\bore" -Filter "bore.exe" -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $borePath) { throw "bore.exe not found!" }
+          Write-Host "Found bore at: $borePath"
+          
+          # Start bore as a background job
+          $job = Start-Job -ScriptBlock {
+            param($exe)
+            & $exe local 3389 --to bore.pub 2>&1
+          } -ArgumentList $borePath
+          
+          # Wait for bore to establish the tunnel
+          Start-Sleep -Seconds 10
+          
+          # Read job output to find the address
+          $output = Receive-Job -Job $job
+          Write-Host "=== Bore Output ==="
+          $output | ForEach-Object { Write-Host $_ }
+          
+          # Try to extract the bore address
+          $fullOutput = $output -join "`n"
+          if ($fullOutput -match 'bore\.pub:(\d+)') {
+              $port = $Matches[1]
+              Write-Host ""
+              Write-Host "============================================"
+              Write-Host "✅ RDP CONNECTION DETAILS"
+              Write-Host "============================================"
+              Write-Host "Address:  bore.pub:$port"
+              Write-Host "Username: runneradmin"
+              Write-Host "Password: P@ssw0rd123!"
+              Write-Host "============================================"
+              Write-Host ""
+              Write-Host "Open your RDP client and connect to bore.pub:$port"
+          } else {
+              Write-Host "⚠️ Could not parse bore address. Full output above."
+          }
+          
+          # Keep alive loop
+          Write-Host "⏳ Keeping session alive..."
+          while ($true) {
+              # Check if bore is still running
+              if ($job.State -ne 'Running') {
+                  Write-Host "⚠️ Bore job stopped. Restarting..."
+                  $job = Start-Job -ScriptBlock {
+                    param($exe)
+                    & $exe local 3389 --to bore.pub 2>&1
+                  } -ArgumentList $borePath
+                  Start-Sleep -Seconds 5
+                  $restartOutput = Receive-Job -Job $job
+                  $restartOutput | ForEach-Object { Write-Host $_ }
+              }
+              
+              $newOutput = Receive-Job -Job $job
+              if ($newOutput) { $newOutput | ForEach-Object { Write-Host $_ } }
+              
+              Write-Host "⏱️ Still active at $(Get-Date)"
+              Start-Sleep -Seconds 30
+          }
